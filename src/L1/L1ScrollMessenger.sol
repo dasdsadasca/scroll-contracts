@@ -44,6 +44,9 @@ contract L1ScrollMessenger is ScrollMessengerBase, IL1ScrollMessenger {
      * Constants *
      *************/
 
+    /// @notice The address of this contract, used for delegatecall protection.
+    address public immutable SELF;
+
     /// @notice The address of Rollup contract.
     address public immutable rollup;
 
@@ -116,6 +119,7 @@ contract L1ScrollMessenger is ScrollMessengerBase, IL1ScrollMessenger {
         address _messageQueueV2,
         address _enforcedTxGateway
     ) ScrollMessengerBase(_counterpart) {
+        SELF = address(this);
         _disableInitializers();
 
         rollup = _rollup;
@@ -364,6 +368,15 @@ contract L1ScrollMessenger is ScrollMessengerBase, IL1ScrollMessenger {
         uint256 _gasLimit,
         address _refundAddress
     ) internal nonReentrant {
+        // Mitigate delegatecall spoofing:
+        // If _msgSender() is SELF (i.e., L1ScrollMessenger itself), it implies a direct call or a call from a trusted component.
+        // However, if address(this) is NOT SELF, it means the code is running via delegatecall from another contract.
+        // This check prevents an attacker contract from making L1ScrollMessenger.sendMessage execute with _msgSender()
+        // resolving to L1ScrollMessenger while the actual storage context is the attacker's contract.
+        if (_msgSender() == SELF) {
+            require(address(this) == SELF, "L1SM: sender spoof via delegatecall");
+        }
+
         // compute the actual cross domain message calldata.
         uint256 _messageNonce = IL1MessageQueueV2(messageQueueV2).nextCrossDomainMessageIndex();
         bytes memory _xDomainCalldata = _encodeXDomainCalldata(_msgSender(), _to, _value, _messageNonce, _message);
